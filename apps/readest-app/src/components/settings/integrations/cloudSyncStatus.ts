@@ -48,19 +48,19 @@ export interface ThirdPartyRowInputs {
 }
 
 export interface CanToggleCloudProviderInputs {
-  isPremium: boolean;
   isConfigured: boolean;
   isEnabled: boolean;
 }
 
 /**
  * Whether a third-party provider's checkbox can be toggled inline. Turning a
- * provider ON requires premium + configured; turning an already-enabled
- * provider OFF is always allowed, even without premium, so a user whose plan
- * lapses is never trapped with a provider they can't disable.
+ * provider ON requires it to be configured first (credentials / a connected
+ * account); an already-enabled provider can always be toggled off, even when
+ * its config has since been cleared, so a user is never trapped with a
+ * provider they can't disable.
  */
 export const canToggleCloudProvider = (s: CanToggleCloudProviderInputs): boolean =>
-  (s.isPremium && s.isConfigured) || s.isEnabled;
+  s.isConfigured || s.isEnabled;
 
 export const getThirdPartyRowStatus = (_: TranslationFunc, s: ThirdPartyRowInputs): string => {
   if (!s.enabled) return s.configured ? _('Configured') : _('Not connected');

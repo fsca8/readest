@@ -30,13 +30,17 @@ describe('isCloudSyncInPlan', () => {
   });
 });
 
-describe('isCloudSyncAllowed (premium paywall)', () => {
-  test('third-party cloud sync requires a paid plan', () => {
-    expect(CLOUD_SYNC_REQUIRES_PREMIUM).toBe(true);
-    expect(isCloudSyncAllowed('free', false)).toBe(false);
+describe('isCloudSyncAllowed (paywall off: BYO storage is free)', () => {
+  test('third-party cloud sync is ungated for every plan', () => {
+    // BYO backends (WebDAV / Google Drive / S3 / OneDrive / iCloud) sync
+    // device-to-provider directly — no official server resources in the path —
+    // so they are available to every plan, signed in or not. Readest Cloud is
+    // the paid service; flipping CLOUD_SYNC_REQUIRES_PREMIUM back on re-gates.
+    expect(CLOUD_SYNC_REQUIRES_PREMIUM).toBe(false);
+    expect(isCloudSyncAllowed('free', false)).toBe(true);
     expect(isCloudSyncAllowed('plus', false)).toBe(true);
     expect(isCloudSyncAllowed('pro', false)).toBe(true);
-    expect(isCloudSyncAllowed('purchase', false)).toBe(false);
+    expect(isCloudSyncAllowed('purchase', false)).toBe(true);
   });
 });
 
@@ -279,17 +283,17 @@ describe('persistReadestCloudChoice', () => {
   });
 });
 
-// Premium is now the plan OR an outright Full Customization purchase.
-describe('isCloudSyncAllowed — customization unlock', () => {
-  test('entitles a free user who bought Full Customization', () => {
+// The paywall is OFF (BYO storage free), so the entitlement arguments no
+// longer change the outcome — the customization-unlock cases are pinned here
+// so a careless re-gate to CLOUD_SYNC_PLANS without the unlock would trip.
+describe('isCloudSyncAllowed — every entitlement combination', () => {
+  test('free plan is allowed with no purchase', () => {
+    expect(isCloudSyncAllowed('free', false)).toBe(true);
+  });
+
+  test('entitlement flags do not narrow the ungated outcome', () => {
     expect(isCloudSyncAllowed('free', true)).toBe(true);
-  });
-
-  test('entitles a grandfathered storage buyer, who carries the flag', () => {
     expect(isCloudSyncAllowed('purchase', true)).toBe(true);
-  });
-
-  test('does not entitle a storage-only buyer after the grace period', () => {
-    expect(isCloudSyncAllowed('purchase', false)).toBe(false);
+    expect(isCloudSyncAllowed('purchase', false)).toBe(true);
   });
 });

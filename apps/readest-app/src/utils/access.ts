@@ -47,10 +47,9 @@ export const isEmailInPlan = (plan: UserPlan, customizationPurchased: boolean): 
   isCustomizationAllowed(plan, customizationPurchased);
 
 /**
- * Plans that include third-party cloud sync (WebDAV / Google Drive): any paid
- * plan — Plus, Pro, and Lifetime (`purchase`). Free users see an upgrade prompt
- * in Settings and the reader's auto-sync stays off, so syncing to a personal
- * cloud is a premium feature.
+ * Plans that include third-party cloud sync (WebDAV / Google Drive / S3 /
+ * OneDrive / iCloud) once {@link CLOUD_SYNC_REQUIRES_PREMIUM} is back on: any
+ * paid plan — Plus, Pro, and Lifetime (`purchase`).
  */
 export const CLOUD_SYNC_PLANS: readonly UserPlan[] = ['plus', 'pro', 'purchase'];
 
@@ -58,20 +57,21 @@ export const isCloudSyncInPlan = (plan: UserPlan, customizationPurchased: boolea
   isCustomizationAllowed(plan, customizationPurchased);
 
 /**
- * Master switch for the third-party cloud-sync premium paywall. ON: cloud
- * sync (WebDAV / Google Drive / S3) requires a {@link CLOUD_SYNC_PLANS} plan —
- * free users see the provider rows with a Premium badge and an upgrade route
- * instead of the config sub-pages, and a downgraded account's still-selected
- * provider is paused (never a silent fallback to Readest Cloud uploads, #4959).
- * Every gate goes through {@link isCloudSyncAllowed}, so this flag is the
- * whole toggle.
+ * Master switch for the third-party cloud-sync premium paywall. OFF: the
+ * BYO-storage backends (WebDAV / Google Drive / S3 / OneDrive / iCloud) sync
+ * device-to-provider directly — no official server resources sit in the path —
+ * so they are available to every plan, signed in or not. Readest Cloud, which
+ * runs on official infrastructure, is the paid service this paywall exists to
+ * fund, and this gate never covers it (it has its own plan/entitlement model).
+ * Every gate goes through {@link isCloudSyncAllowed}, so flipping this back to
+ * `true` re-gates the whole section in one line.
  */
-export const CLOUD_SYNC_REQUIRES_PREMIUM = true;
+export const CLOUD_SYNC_REQUIRES_PREMIUM = false;
 
 /**
- * Whether third-party cloud sync is available for a plan. Falls back to the
- * {@link isCloudSyncInPlan} paywall while {@link CLOUD_SYNC_REQUIRES_PREMIUM}
- * is on; flipping the switch off ungates every plan.
+ * Whether third-party cloud sync is available for a plan. While
+ * {@link CLOUD_SYNC_REQUIRES_PREMIUM} is off this is always true; once it is
+ * re-enabled it falls back to the {@link isCloudSyncInPlan} paywall.
  */
 export const isCloudSyncAllowed = (plan: UserPlan, customizationPurchased: boolean): boolean =>
   !CLOUD_SYNC_REQUIRES_PREMIUM || isCloudSyncInPlan(plan, customizationPurchased);

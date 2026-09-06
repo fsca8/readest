@@ -310,9 +310,12 @@ describe('getReadyFileSyncBackends', () => {
     expect(getReadyFileSyncBackends(settings)).toEqual(['webdav', 'gdrive']);
   });
 
-  test('excludes everything when the plan gate pauses third-party sync', () => {
+  test('free plan keeps third-party sync (BYO storage is ungated)', () => {
+    // Third-party backends sync device-to-provider directly — no official
+    // server resources in the path — so they are available to every plan
+    // while CLOUD_SYNC_REQUIRES_PREMIUM is off.
     setCachedUserPlan('free');
-    expect(getReadyFileSyncBackends(settings)).toEqual([]);
+    expect(getReadyFileSyncBackends(settings)).toEqual(['webdav', 'gdrive']);
   });
 
   test('rules icloud out off Apple platforms (canBackendRun false)', () => {
