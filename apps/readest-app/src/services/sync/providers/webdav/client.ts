@@ -176,9 +176,19 @@ const timeoutForMethod = (method: string): number =>
   METADATA_METHODS.has(method.toUpperCase()) ? METADATA_TIMEOUT_MS : TRANSFER_TIMEOUT_MS;
 
 /**
- * `fetch` with an AbortController deadline. On expiry the request is aborted
- * and a plain 'Request timed out' error is thrown — call sites wrap it into
- * the WebDAVRequestError taxonomy as a NETWORK failure.
+ * `fetch` with a hard deadline. On expiry the request is best-effort aborted
+ * AND the awaited promise is settled by racing the deadline — the two are not
+ * the same thing: on desktop `fetch` is tauri-plugin-http (a native reqwest
+ * call the JS side cannot reliably cancel mid-flight). A server that accepts
+ * the connection and then stalls would otherwise leave the fetch pending
+ * forever (the abort fires, the native request ignores it), pinning the sync
+ * pass exactly like the pre-watchdog streaming transfers did. Racing the
+ * deadline guarantees the caller always settles at `timeoutMs`; the orphaned
+ * native request keeps running in the background and is harmless (GETs are
+ * side-effect free; PUTs are idempotent overwrites).
+ *
+ * A plain 'Request timed out' error is thrown — call sites wrap it into the
+ * WebDAVRequestError taxonomy as a NETWORK failure.
  */
 const fetchWithTimeout = async (
   fetchFn: ReturnType<typeof getFetch>,
@@ -187,14 +197,18 @@ const fetchWithTimeout = async (
   timeoutMs: number,
 ): Promise<Response> => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // Best-effort cancel of the orphan; the race below settles regardless.
+      controller.abort();
+      reject(new Error('Request timed out'));
+    }, timeoutMs);
+  });
   try {
-    return await fetchFn(url, { ...init, signal: controller.signal });
-  } catch (e) {
-    if (controller.signal.aborted) throw new Error('Request timed out');
-    throw e;
+    return await Promise.race([fetchFn(url, { ...init, signal: controller.signal }), deadline]);
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 };
 

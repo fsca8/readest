@@ -18,8 +18,16 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 
 use read_progress_stream::ReadProgressStream;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{collections::HashMap, sync::Arc};
+
+/// Native transfer backstop timeouts. The JS-side stall guard
+/// (`withStallGuard` in WebDAVProvider) frees the UI after ~60s without
+/// progress; these bound the orphaned native request that keeps running in
+/// the background after the JS side has moved on — a half-open connection
+/// used to pin the whole sync pass forever (no timeout of any kind).
+const TRANSFER_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const TRANSFER_TOTAL_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -169,6 +177,8 @@ pub async fn download_file(
     const PART_SIZE: u64 = 1024 * 1024;
 
     let client = reqwest::ClientBuilder::new()
+        .connect_timeout(TRANSFER_CONNECT_TIMEOUT)
+        .timeout(TRANSFER_TOTAL_TIMEOUT)
         .danger_accept_invalid_certs(skip_ssl_verification.unwrap_or(false))
         .danger_accept_invalid_hostnames(skip_ssl_verification.unwrap_or(false))
         .build()?;
@@ -270,12 +280,14 @@ pub async fn download_file(
 
     let file = Arc::new(tokio::sync::Mutex::new(file));
     let progress = Arc::new(tokio::sync::Mutex::new(TransferStats::default()));
+    let parts_ok = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     stream::iter(0..part_count)
         .for_each_concurrent(8, |i| {
             let client = client.clone();
             let file = Arc::clone(&file);
             let progress = Arc::clone(&progress);
+            let parts_ok = Arc::clone(&parts_ok);
             let headers = headers.clone();
             let url = url.to_string();
             let on_progress = on_progress.clone();
@@ -311,6 +323,7 @@ pub async fn download_file(
                     f.seek(std::io::SeekFrom::Start(start)).await.unwrap();
                     f.write_all(&bytes).await.unwrap();
                 }
+                parts_ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 {
                     let mut stat = progress.lock().await;
@@ -324,6 +337,20 @@ pub async fn download_file(
             }
         })
         .await;
+
+    // A part that errored or timed out is skipped silently in the loop above;
+    // with per-request timeouts a stalled part would otherwise leave a
+    // truncated file reported as a successful download. (Byte-length can't be
+    // trusted here: the file is pre-sized via set_len, so holes from skipped
+    // parts keep the metadata length honest.) Verify the part count instead.
+    {
+        let ok = parts_ok.load(std::sync::atomic::Ordering::Relaxed);
+        if ok != part_count {
+            return Err(Error::ContentLength(format!(
+                "incomplete multipart download: {ok} of {part_count} parts"
+            )));
+        }
+    }
 
     Ok(resp_headers)
 }
@@ -342,7 +369,10 @@ pub async fn upload_file(
     let file = File::open(file_path).await?;
     let file_len = file.metadata().await.unwrap().len();
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(TRANSFER_CONNECT_TIMEOUT)
+        .timeout(TRANSFER_TOTAL_TIMEOUT)
+        .build()?;
     let mut request = match method.to_uppercase().as_str() {
         "POST" => client.post(url),
         "PUT" => client.put(url),
